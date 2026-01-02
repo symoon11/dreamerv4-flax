@@ -1,2 +1,2 @@
-# dreamerv4
-Flax implementation of DreamerV4
+# Flax Implementation of DreamerV4
+

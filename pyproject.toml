@@ -1,0 +1,13 @@
+[project]
+name = "dreamerv4-flax"
+version = "0.1.0"
+description = "Flax implementation of DreamerV4"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "flax>=0.12.2",
+]
+
+[tool.ruff]
+line-length = 120
+
