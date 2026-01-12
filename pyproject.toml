@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "flax>=0.12.2",
+    "numpy>=2.4.1",
+    "tokamax>=0.0.9",
 ]
 
 [tool.ruff]
