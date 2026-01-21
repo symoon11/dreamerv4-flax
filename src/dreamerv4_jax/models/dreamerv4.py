@@ -4,6 +4,7 @@ TODO:
 """
 
 import sys
+import time
 
 import jax
 import jax.numpy as jnp
@@ -46,10 +47,7 @@ class DreamerV4MLP(nnx.Module):
     def __call__(self, hidden_states: jax.Array) -> jax.Array:
         intermediate_parallel = tokamax.gated_linear_unit(
             hidden_states,
-            jnp.stack(
-                [self.gate_proj.kernel.get_value(), self.up_proj.kernel.get_value()],
-                axis=1,
-            ),
+            jnp.stack([self.gate_proj.kernel[...], self.up_proj.kernel[...]], axis=1),
             activation=jax.nn.swish,
         )
         output = self.down_proj(intermediate_parallel)
@@ -76,6 +74,12 @@ def main(_):
         return model(hidden_states)
 
     autotune_result = tokamax.autotune(forward.lower(hidden_states).lowered)
+
+    start_time = time.time()
+    for _ in range(100):
+        forward(hidden_states)
+    end_time = time.time()
+    print(f"Time taken: {end_time - start_time} seconds")
 
 
 if __name__ == "__main__":
