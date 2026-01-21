@@ -1,8 +1,15 @@
+"""
+TODO:
+- Implement sharding
+"""
+
+import sys
+
 import jax
 import jax.numpy as jnp
+import tokamax
+from absl import app, flags, logging
 from flax import nnx
-
-from sgl_jax.srt.layers.linear import LinearBase
 
 
 class DreamerV4MLP(nnx.Module):
@@ -10,49 +17,66 @@ class DreamerV4MLP(nnx.Module):
         self,
         hidden_size: int,
         intermediate_size: int,
-        mesh: jax.sharding.Mesh,
-        layer_id: int = 0,
-        dtype: jnp.dtype = jnp.float16,
-    ):
-        self.layer_id = layer_id
-
-        self.gate_proj = LinearBase(
-            input_size=hidden_size,
-            output_size=intermediate_size,
-            kernel_axes=(None, "tensor"),
+        dtype: jnp.dtype = jnp.bfloat16,
+        *,
+        rngs: nnx.Rngs,
+    ) -> None:
+        self.gate_proj = nnx.Linear(
+            hidden_size,
+            intermediate_size,
             use_bias=False,
-            params_dtype=dtype,
-            mesh=mesh,
+            param_dtype=dtype,
+            rngs=rngs,
         )
-
-        self.up_proj = LinearBase(
-            input_size=hidden_size,
-            output_size=intermediate_size,
-            kernel_axes=(None, "tensor"),
+        self.up_proj = nnx.Linear(
+            hidden_size,
+            intermediate_size,
             use_bias=False,
-            params_dtype=dtype,
-            mesh=mesh,
+            param_dtype=dtype,
+            rngs=rngs,
         )
-
-        self.down_proj = LinearBase(
-            input_size=intermediate_size,
-            output_size=hidden_size,
-            kernel_axes=("tensor", None),
+        self.down_proj = nnx.Linear(
+            intermediate_size,
+            hidden_size,
             use_bias=False,
-            params_dtype=dtype,
-            mesh=mesh,
+            param_dtype=dtype,
+            rngs=rngs,
         )
-
-        self.act_fn = jax.nn.silu
 
     def __call__(self, hidden_states: jax.Array) -> jax.Array:
-        a1, _ = self.gate_proj(hidden_states)
-        a2, _ = self.up_proj(hidden_states)
-        intermediate_parallel = a2 * self.act_fn(a1)
-        output, _ = self.down_proj(intermediate_parallel)
+        intermediate_parallel = tokamax.gated_linear_unit(
+            hidden_states,
+            jnp.stack(
+                [self.gate_proj.kernel.get_value(), self.up_proj.kernel.get_value()],
+                axis=1,
+            ),
+            activation=jax.nn.swish,
+        )
+        output = self.down_proj(intermediate_parallel)
         return output
 
 
 class DreamerV4Attention(nnx.Module):
-    def __init__(self, hidden_size: int, num_heads: int, num_kv_heads: int, layer_id: int = 0):
+    def __init__(
+        self, hidden_size: int, num_heads: int, num_kv_heads: int, layer_id: int = 0
+    ):
         pass
+
+
+def main(_):
+    jax.config.update("jax_platforms", "cuda")
+    rngs = nnx.Rngs(jax.random.PRNGKey(0))
+    model = DreamerV4MLP(
+        hidden_size=1024, intermediate_size=4096, dtype=jnp.bfloat16, rngs=rngs
+    )
+    hidden_states = rngs.normal((10, 100, 1024), dtype=jnp.bfloat16)
+
+    @nnx.jit
+    def forward(hidden_states: jax.Array) -> jax.Array:
+        return model(hidden_states)
+
+    autotune_result = tokamax.autotune(forward.lower(hidden_states).lowered)
+
+
+if __name__ == "__main__":
+    app.run(main)
